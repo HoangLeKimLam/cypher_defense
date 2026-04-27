@@ -8,9 +8,10 @@ import random
 import pygame
 
 import settings
+import ui.sprites as sprites
 from core.graph import GridGraph, Celltype
 from core.data_structures import CustomStack
-from entities.malware import Malware, Trojan, Worm, Spyware, Ransomware
+from entities.malware import Malware, Trojan, Worm, Spyware, Ransomware, TrojanRanged
 from entities.tower import Tower, BasicNode, IceWall, RadarNode
 from entities.projectile import Projectile
 from systems.spatial_hash import SpatialHash
@@ -19,6 +20,7 @@ from systems.spatial_hash import SpatialHash
 # Ánh xạ chuỗi từ JSON → class Malware tương ứng
 MALWARE_FACTORY = {
     "trojan":     Trojan,
+    "trojan_ranged": TrojanRanged,
     "worm":       Worm,
     "spyware":    Spyware,
     "ransomware": Ransomware,
@@ -85,15 +87,21 @@ class Game:
         self.screen = pygame.display.set_mode(
             (settings.SCREEN_WIDTH, settings.SCREEN_HEIGHT)
         )
+        sprites.init()   # phải sau set_mode() để convert_alpha() hoạt động
 
         pygame.display.set_caption("Cypher Defense")
-
         self.clock = pygame.time.Clock()
         self.running = True
         self.game_over = False
         self.victory = False
 
         self.selected_tower = BasicNode
+
+        # Animation timers (visual only)
+        self._portal_timer = 0.0
+        self._portal_frame = 0
+        self._server_timer = 0.0
+        self._server_frame = 0
 
         self.load_level(1)
         pass
@@ -126,15 +134,15 @@ class Game:
         cols = self.config["cols"]
         self.graph = GridGraph(rows, cols)
         self.graph.load_from_list(self.config["grid"], self.config)
-
+        self.weights_and_cells = self.graph.get_spawn_weight()
         self.spatial_hash = SpatialHash(rows, cols, bucket_cell_size=2)
-
         self.malwares = []
         self.towers = []
         self.projectiles = []
-
+        self.portal=[]
         self.undo_stack = CustomStack()
-
+        self._pre_wave=True
+        self._pre_wave_timer=settings.PRE_WAVE_DURATION
         self.money = self.config["start_money"]
         self.server_hp = settings.SERVER_MAX_HP
 
@@ -143,8 +151,8 @@ class Game:
         self.spawn_timer = 0.0
         self.spawn_interval = self.config["waves"][0]["interval_seconds"]
         self._start_wave(self.wave_index)
-        self.font = pygame.font.SysFont("monospace", 18)
-        self.font_big = pygame.font.SysFont("monospace", 36)
+        self.font = pygame.font.SysFont("courier new", 18)
+        self.font_big = pygame.font.SysFont("courier new", 36)
         pass
 
     def _start_wave(self, wave_index: int):
@@ -169,6 +177,14 @@ class Game:
             return
 
         wave_data = waves[wave_index]
+        num_portals = wave_data["portals"]
+        weights = [w for w, _ in self.weights_and_cells]
+        cells   = [c for _, c in self.weights_and_cells]
+        for x,y in self.portal:
+            self.graph.set_cell(x,y,Celltype.PATH)
+        self.portal  = random.choices(cells, weights=weights, k=num_portals)
+        for x,y in self.portal:
+            self.graph.set_cell(x,y,Celltype.SPAWN)
         self.spawn_queue = list(wave_data["enemies"])
         self.spawn_interval = wave_data["interval_seconds"]
         self.spawn_timer = 0.0
@@ -267,14 +283,36 @@ class Game:
             Spawner trước malwares để malware mới được di chuyển ngay trong frame spawn.
             Towers sau malwares để query SpatialHash với vị trí đã cập nhật.
         """
+        if self._pre_wave:
+            self._pre_wave_timer -= dt
+            if self._pre_wave_timer <= 0:
+                self._pre_wave = False
+            return
+    # KHÔNG gọi WaveSpawner.tick()
+    # KHÔNG spawn malware
+         # vẫn vẽ map, tháp, HUD
+        
         self._update_spawner(dt)
         self._update_malwares(dt)
         self._update_towers(dt)
         self._update_projectiles(dt)
         self._check_wave_complete()
+        self._update_animations(dt)
         pass
 
-    def _update_spawner(self, dt: float):
+    def _update_animations(self, dt: float):
+        """Cập nhật animation timer cho portal và server (visual only)."""
+        self._portal_timer += dt
+        if self._portal_timer >= 1.0 / settings.PORTAL_ANIM_FPS:
+            self._portal_timer = 0.0
+            self._portal_frame = (self._portal_frame + 1) % 14
+
+        self._server_timer += dt
+        if self._server_timer >= 1.0 / settings.SERVER_ANIM_FPS:
+            self._server_timer = 0.0
+            self._server_frame = (self._server_frame + 1) % 4
+    def _update_spawner ( self, dt: float):
+        
         """Xử lý logic spawn malware theo wave timer.
 
         Args:
@@ -303,12 +341,10 @@ class Game:
         malware_type = self.spawn_queue.pop(0)
 
         # Chọn vị trí spawn ngẫu nhiên có trọng số
-        weights_and_cells = self.graph.get_spawn_weight()
-        if not weights_and_cells:
+        if not self.portal:
             return
-        weights = [w for w, _ in weights_and_cells]
-        cells   = [c for _, c in weights_and_cells]
-        chosen  = random.choices(cells, weights=weights, k=1)[0]
+        random.seed(None)
+        chosen  = random.choices(self.portal, k=1)[0]
 
         self.spawn_malware(malware_type, chosen)
         pass
@@ -325,6 +361,7 @@ class Game:
             - Trừ self.server_hp khi malware đến server; đặt game_over nếu về 0.
             - Cộng self.money += malware.reward khi malware chết.
             - Xóa malware đã chết hoặc đến server khỏi self.malwares và spatial_hash.
+            - Collect projectiles từ ranged malware.
 
         Note:
             old_pos phải được lưu TRƯỚC malware.update(dt) để update_position()
@@ -338,18 +375,74 @@ class Game:
             malware.update(dt)
             if malware.pos != old_pos:
                 self.spatial_hash.update_position(malware, old_pos)
+
+            # Collect projectiles từ ranged malware (nếu có)
+            if hasattr(malware, 'get_projectiles'):
+                for proj in malware.get_projectiles():
+                    self.projectiles.append(proj)
+
+            # Xử lý damage từ malware (server hoặc tower)
+            hit=malware.get_pending_hit()
+            if hit:
+                if hit["type"]=="server":
+                    self.server_hp -= hit["dmg"]
+                elif hit["type"]=="tower":
+                    tower=self._get_tower_at(hit["cell"])
+                    if tower:
+                        tower.take_damage(hit["dmg"])
+                        if tower.is_destroyed():
+                            self._on_tower_destroyed(tower)
+                malware.clear_pending_hit()
+
             if malware.has_reached_server():
-                self.server_hp -= 1
                 if self.server_hp <= 0:
                     self.game_over = True
             if malware.is_dead():
-                self.money += malware.reward
-                dead.append(malware)
+                # Add reward when dies (not when animation finishes)
+                if not malware._reward_given:
+                    self.money += malware.reward
+                    malware._reward_given = True
+                # Only remove after death animation is done
+                if malware.is_death_animation_done():
+                    dead.append(malware)
         for m in dead:
             self.malwares.remove(m)
             self.spatial_hash.remove(m)
         pass
+    def _get_tower_at(self, cell):
+        """Tìm tower đang chiếm ô lưới chỉ định.
 
+        Args:
+            cell (tuple[int,int]): Tọa độ ô cần tìm (row, col).
+
+        Returns:
+            Tower | None: Đối tượng Tower tại ô đó, hoặc None nếu không có.
+        """
+        for tower in self.towers:
+            if tower.pos == cell:
+                return tower
+        return None
+
+    def _on_tower_destroyed(self, tower):
+        """Xử lý khi một tower bị phá hủy.
+
+        Chuyển ô tower về PATH, xóa khỏi danh sách, tính lại đường đi
+        cho tất cả malware đang sống.
+
+        Args:
+            tower (Tower): Tower vừa bị phá hủy.
+
+        Side effects:
+            - Cập nhật graph cell từ TOWER → PATH.
+            - Xóa tower khỏi self.towers.
+            - Gọi _calculate_path() cho tất cả malware.
+        """
+        self.graph.set_cell(*tower.pos, Celltype.PATH)
+        self.towers.remove(tower)
+        for m in self.malwares:
+            m._calculate_path()
+            if hasattr(m, 'attack_pos'):
+                m.state = "moving"
     def _update_towers(self, dt: float):
         """Cho từng tower query SpatialHash, chọn mục tiêu, bắn Projectile.
 
@@ -381,11 +474,14 @@ class Game:
 
         Side effects:
             - Gọi proj.update(dt) để di chuyển từng đạn.
+            - Gọi proj.apply_hit(game) khi proj.has_hit() để xử lý damage.
             - Lọc self.projectiles, giữ lại chỉ những đạn chưa has_hit().
-            - Đạn có has_hit()=True (đã chạm target hoặc target đã chết) bị xóa.
         """
         for proj in self.projectiles:
             proj.update(dt)
+            if proj.has_hit():
+                proj.apply_hit(self)
+
         self.projectiles = [p for p in self.projectiles if not p.has_hit()]
         pass
 
@@ -524,42 +620,111 @@ class Game:
         """
         self.screen.fill(settings.COLOR_BG)
         self._draw_grid()
-        self._draw_towers()
-        self._draw_malwares()
+
         self._draw_projectiles()
         self._draw_hud()
+        self._draw_countdown()
         self._draw_game_over()
         pygame.display.flip()
         pass
-
     def _draw_grid(self):
-        """Vẽ từng ô lưới theo màu tương ứng với CellType.
-
-        Side effects:
-            - Vẽ hình chữ nhật (CELL_SIZE-1) × (CELL_SIZE-1) cho mỗi ô.
-              Trừ 1 pixel để tạo đường kẻ lưới giữa các ô.
-
-        Note:
-            Sau khi implement hàm này, chạy game sẽ thấy mê cung màu sắc:
-            xám đậm=WALL, nâu=PATH, xanh lá=SERVER, cam=SPAWN, xanh dương=TOWER.
-            Ô TOWER được vẽ màu WALL ở đây — Tower.draw() vẽ thêm hình tròn lên trên.
-        """
+        """Hệ thống kết xuất (Render) Y-Sorting thống nhất cho Tường, Quái, Tháp"""
+        import random
+        import pygame
+        cs = settings.CELL_SIZE
+        wall_surfs   = sprites.get("wall")
+        path_surfs   = sprites.get("path")
+        
+        # 1. VẼ MẶT ĐẤT TRƯỚC (Layer nền dưới cùng)
+        random.seed(42)
         for row in range(self.graph.row):
             for col in range(self.graph.col):
-                cell_type = self.graph.get_cell(row, col)
-                color = self._get_cell_color(cell_type)
+                path_surf = random.choices(path_surfs, k=1)[0]
+                # Lưu ý: Luôn vẽ sàn, kể cả ở ô có tường để khi quái đi sau tường không bị lọt nền đen
+                self.screen.blit(path_surf, (col * cs, row * cs))
 
-                # Tọa độ pixel góc trên-trái của ô
-                px = col * settings.CELL_SIZE
-                py = row * settings.CELL_SIZE
+        # 2. KHỞI TẠO DANH SÁCH LAYER (Y-Sorting)
+        render_list = []
 
-                # Vẽ ô (trừ 1 pixel để có grid line)
-                pygame.draw.rect(
-                    self.screen, color,
-                    (px, py, settings.CELL_SIZE - 1, settings.CELL_SIZE - 1)
-                )
-        pass
+        # 3. GOM TƯỜNG (Duyệt ma trận)
+        random.seed(42)
+        for row in range(self.graph.row):
+            for col in range(self.graph.col):
+                wall_surf = random.choices(wall_surfs, weights=[60,  36, 4], k=1)[0]
+                cell = self.graph.get_cell(row, col)
+                
+                if cell == 0:
+                    # TẠO TƯỜNG GRADIENT: Ở đây tôi giả định bạn đã có hàm tạo 3D.
+                    # Nếu bạn dùng code tạo gradient trước đó, hãy truyền wall_surf vào hàm đó.
+                    # Dưới đây là code tạm tính toán vị trí Y.
+                    tall_factor = getattr(settings, 'TALL_FACTOR', 1.7)
+                    tall_h = int(cs * tall_factor)
+                    
+                    # Chỗ này thay bằng: wall_3d = self.create_gradient_wall(wall_surf, ...)
+                    wall_3d = pygame.transform.scale(wall_surf, (cs, tall_h)) 
 
+                    render_list.append({
+                        'surf': wall_3d,
+                        'pos': (col * cs, row * cs - (tall_h - cs)),
+                        'sort_y': (row + 1) * cs, # Neo đáy tường
+                        'type': 'wall'
+                    })
+
+        # 4. GOM QUÁI VẬT (Malware)
+        for malware in self.malwares:
+            data = malware.get_render_data(cs)
+            if data:
+                render_list.append(data)
+
+        # 5. GOM THÁP — bottom-center aligned, cùng hệ Y-sort với tường và quái
+        for tower in self.towers:
+            data = tower.get_render_data(cs)
+            if data:
+                render_list.append(data)
+
+        # 5b. GOM SERVER — animated, bottom-center aligned
+        srv_row, srv_col = self.graph.server_pos
+        server_frames = sprites.get("server")
+        if server_frames:
+            srv_surf = server_frames[self._server_frame % len(server_frames)]
+            sw, sh = srv_surf.get_size()
+            render_list.append({
+                'surf': srv_surf,
+                'pos': (srv_col * cs + (cs - sw) // 2, srv_row * cs + cs - sh),
+                'sort_y': (srv_row + 1) * cs - 1,  # Render behind malware at same position
+                'type': 'server'
+            })
+
+        # 5c. GOM PORTAL — animated, một frame chung cho tất cả spawn points
+        portal_frames = sprites.get("spawn")
+        if portal_frames and self.portal:
+            p_surf = portal_frames[self._portal_frame % len(portal_frames)]
+            sw, sh = p_surf.get_size()
+            for p_row, p_col in self.portal:
+                if self._pre_wave: continue
+                render_list.append({
+                    'surf': p_surf,
+                    'pos': (p_col * cs + (cs - sw) // 2, p_row * cs + cs - sh),
+                    'sort_y': (p_row + 1) * cs,
+                    'type': 'portal'
+                })
+
+        # 6. SẮP XẾP THEO TRỤC Y (Vũ khí bí mật của 3D)
+        # Cái nào sort_y nhỏ (ở trên) vẽ trước, sort_y lớn (ở dưới) vẽ đè lên sau
+        render_list.sort(key=lambda obj: obj['sort_y'])
+
+        # 7. VẼ LÊN MÀN HÌNH
+        for item in render_list:
+            # Vẽ bóng đổ chung cho cả Quái và Tường
+            shadow = pygame.Surface((cs, 10), pygame.SRCALPHA)
+            pygame.draw.ellipse(shadow, (0, 0, 0, 80), [0, 0, cs, 10])
+            # Vẽ bóng ngay sát chân đối tượng
+            self.screen.blit(shadow, (item['pos'][0], item['sort_y'] - 5))
+            
+            # Vẽ Surface tổng hợp
+            self.screen.blit(item['surf'], item['pos'])
+
+ 
     def _get_cell_color(self, cell_type: int) -> tuple:
         """Trả về màu RGB cho từng loại ô lưới.
 
@@ -586,32 +751,7 @@ class Game:
             return settings.COLOR_BG
         pass
 
-    def _draw_malwares(self):
-        """Vẽ tất cả malware đang sống lên màn hình.
 
-        Side effects:
-            - Gọi malware.draw(screen, CELL_SIZE) cho từng malware trong self.malwares.
-
-        Note:
-            Gọi sau _draw_towers() để malware hiển thị trên tower khi chồng lên nhau.
-        """
-        for malware in self.malwares:
-            malware.draw(self.screen, settings.CELL_SIZE)
-        pass
-
-    def _draw_towers(self):
-        """Vẽ icon bổ sung lên các ô tower đã đặt.
-
-        Side effects:
-            - Gọi tower.draw(screen, CELL_SIZE) cho từng tower trong self.towers.
-
-        Note:
-            Lưới đã tô màu WALL cho ô TOWER trong _draw_grid().
-            Tower.draw() vẽ THÊM hình tròn nhỏ để phân biệt loại tower.
-        """
-        for tower in self.towers:
-            tower.draw(self.screen, settings.CELL_SIZE)
-        pass
 
     def _draw_projectiles(self):
         """Vẽ tất cả đạn đang bay lên màn hình.
@@ -639,36 +779,77 @@ class Game:
             HUD nằm trong vùng y = GRID_ROWS*CELL_SIZE → SCREEN_HEIGHT.
             handle_events() không xử lý click chuột trong vùng này.
         """
-        hud_y = settings.GRID_ROWS * settings.CELL_SIZE
+        cs    = settings.CELL_SIZE
+        hud_y = settings.GRID_ROWS * cs
+        W     = settings.SCREEN_WIDTH
 
-        # Nền HUD
-        pygame.draw.rect(
-            self.screen, settings.COLOR_HUD_BG,
-            (0, hud_y, settings.SCREEN_WIDTH, settings.HUD_HEIGHT)
-        )
+        # Nền HUD có đường viền trên
+        pygame.draw.rect(self.screen, (14, 14, 22), (0, hud_y, W, settings.HUD_HEIGHT))
+        pygame.draw.line(self.screen, (0, 180, 200), (0, hud_y), (W, hud_y), 2)
 
-        # Tiền
-        money_surf = self.font.render(f"Money: ${self.money}", True, settings.COLOR_HUD_TEXT)
-        self.screen.blit(money_surf, (10, hud_y + 10))
+        # --- Hàng trên: Money | Server HP | Wave ---
+        top_y = hud_y + 8
 
-        # HP Server
-        hp_surf = self.font.render(f"Server HP: {self.server_hp}", True, settings.COLOR_HUD_TEXT)
-        self.screen.blit(hp_surf, (220, hud_y + 10))
+        # Money icon (vàng)
+        pygame.draw.circle(self.screen, (255, 210, 40), (18, top_y + 7), 7)
+        pygame.draw.circle(self.screen, (200, 160, 0),  (18, top_y + 7), 7, 1)
+        money_c = (255, 230, 80) if self.money >= 50 else (200, 80, 80)
+        money_s = self.font.render(f"${self.money}", True, money_c)
+        self.screen.blit(money_s, (30, top_y))
 
-        # Wave hiện tại
+        # Server HP bar
+        hp_x   = 140
+        bar_w  = 160
+        hp_rat = max(0.0, self.server_hp / settings.SERVER_MAX_HP)
+        hp_col = (50, 220, 80) if hp_rat > 0.5 else (220, 180, 40) if hp_rat > 0.2 else (220, 50, 50)
+        pygame.draw.rect(self.screen, (60, 20, 20),  (hp_x, top_y + 2, bar_w, 10))
+        pygame.draw.rect(self.screen, hp_col,         (hp_x, top_y + 2, int(bar_w * hp_rat), 10))
+        pygame.draw.rect(self.screen, (100, 100, 120),(hp_x, top_y + 2, bar_w, 10), 1)
+        hp_s = self.font.render(f"SRV {self.server_hp}", True, settings.COLOR_HUD_TEXT)
+        self.screen.blit(hp_s, (hp_x + bar_w + 6, top_y))
+
+        # Wave
         total_waves = len(self.config["waves"])
-        wave_surf = self.font.render(f"Wave: {self.wave_index + 1}/{total_waves}", True, settings.COLOR_HUD_TEXT)
-        self.screen.blit(wave_surf, (450, hud_y + 10))
-        # Hướng dẫn phím
-        hint = self.font.render("1=Basic  2=Ice  3=Radar  Ctrl+Z=Undo", True, (120, 120, 120))
-        self.screen.blit(hint, (10, hud_y + 32))
+        wave_c = (255, 180, 50)
+        wave_s = self.font.render(f"WAVE {min(self.wave_index + 1, total_waves)}/{total_waves}", True, wave_c)
+        self.screen.blit(wave_s, (W - wave_s.get_width() - 10, top_y))
 
-          # Tower đang chọn
+        # --- Hàng dưới: Hint + selected tower ---
+        bot_y = hud_y + 30
+        hint  = self.font.render("[1] Basic  [2] Ice  [3] Radar  [Ctrl+Z] Undo", True, (80, 80, 100))
+        self.screen.blit(hint, (10, bot_y))
+
         name_map = {BasicNode: "BasicNode", IceWall: "IceWall", RadarNode: "RadarNode"}
+        cost_map = {BasicNode: settings.TOWER_BASIC_COST,
+                    IceWall:   settings.TOWER_ICE_COST,
+                    RadarNode: settings.TOWER_RADAR_COST}
         sel_name = name_map.get(self.selected_tower, "?")
-        sel_surf = self.font.render(f"[{sel_name}]", True, (100, 200, 255))
-        self.screen.blit(sel_surf, (560, hud_y + 32))
-        pass
+        sel_cost = cost_map.get(self.selected_tower, 0)
+        enough   = self.money >= sel_cost
+        sel_col  = (80, 200, 255) if enough else (180, 80, 80)
+        sel_s    = self.font.render(f"▶ {sel_name} (${sel_cost})", True, sel_col)
+        self.screen.blit(sel_s, (W - sel_s.get_width() - 10, bot_y))
+
+    def _draw_countdown(self):
+        """Vẽ countdown ở giữa màn hình khi chờ wave."""
+        if not self._pre_wave:
+            return
+
+        W = settings.SCREEN_WIDTH
+        H = settings.SCREEN_HEIGHT
+        countdown = max(0, int(self._pre_wave_timer) + 1)
+
+        # Vẽ text lớn ở giữa màn hình
+        countdown_s = self.font_big.render(f"WAVE IN {countdown}s", True, (255, 200, 0))
+        mid_x = W // 2 - countdown_s.get_width() // 2
+        mid_y = H // 2 - countdown_s.get_height() // 2
+
+        # Shadow effect (vẽ đen phía dưới-phải)
+        shadow = self.font_big.render(f"WAVE IN {countdown}s", True, (0, 0, 0))
+        self.screen.blit(shadow, (mid_x + 3, mid_y + 3))
+
+        # Text chính
+        self.screen.blit(countdown_s, (mid_x, mid_y))
 
     def _draw_game_over(self):
         """Vẽ màn hình kết thúc nếu game_over hoặc victory.
@@ -684,27 +865,44 @@ class Game:
             bán trong suốt mà không ảnh hưởng đến các layer bên dưới đã vẽ.
         """
         if self.game_over:
-            text = "GAME OVER"
-            color = (220, 50, 50)
+            text      = "// SYSTEM BREACHED //"
+            sub_text  = "SERVER COMPROMISED"
+            color     = (220, 50, 50)
+            sub_color = (180, 30, 30)
         elif self.victory:
-            text = "YOU WIN!"
-            color = (50, 220, 100)
+            text      = "// THREAT ELIMINATED //"
+            sub_text  = "ALL WAVES REPELLED"
+            color     = (50, 220, 100)
+            sub_color = (30, 180, 80)
         else:
             return
 
-        # Vẽ overlay mờ
-        overlay = pygame.Surface((settings.SCREEN_WIDTH, settings.SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 150))
+        W, H = settings.SCREEN_WIDTH, settings.SCREEN_HEIGHT
+
+        # Overlay
+        overlay = pygame.Surface((W, H), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
         self.screen.blit(overlay, (0, 0))
 
-        # Vẽ chữ to ở giữa
-        surf = self.font_big.render(text, True, color)
-        x = (settings.SCREEN_WIDTH  - surf.get_width())  // 2
-        y = (settings.SCREEN_HEIGHT - surf.get_height()) // 2
-        self.screen.blit(surf, (x, y))
+        # Panel box
+        pw, ph = 480, 140
+        px, py = (W - pw) // 2, (H - ph) // 2
+        pygame.draw.rect(self.screen, (18, 18, 28), (px, py, pw, ph))
+        pygame.draw.rect(self.screen, color,         (px, py, pw, ph), 2)
+        # Corner accents
+        for ox, oy, dx, dy in [(px,py,1,1),(px+pw,py,-1,1),(px,py+ph,1,-1),(px+pw,py+ph,-1,-1)]:
+            pygame.draw.line(self.screen, color, (ox, oy), (ox+dx*12, oy),       2)
+            pygame.draw.line(self.screen, color, (ox, oy), (ox,       oy+dy*12), 2)
 
-        # Hướng dẫn thoát
-        hint = self.font.render("Press ESC to quit", True, (200, 200, 200))
-        hx = (settings.SCREEN_WIDTH - hint.get_width()) // 2
-        self.screen.blit(hint, (hx, y + 50))
+        # Main text
+        surf = self.font_big.render(text, True, color)
+        self.screen.blit(surf, ((W - surf.get_width()) // 2, py + 20))
+
+        # Sub text
+        sub  = self.font.render(sub_text, True, sub_color)
+        self.screen.blit(sub, ((W - sub.get_width()) // 2, py + 68))
+
+        # Hint
+        hint = self.font.render("Press ESC to quit", True, (100, 100, 120))
+        self.screen.blit(hint, ((W - hint.get_width()) // 2, py + 98))
         pass

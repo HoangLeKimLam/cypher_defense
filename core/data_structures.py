@@ -1,50 +1,59 @@
 class Node:
-    """
-    Đại diện cho một node trong linked list.
+    """Đại diện cho một node trong linked list.
 
     Attributes:
-        value: Dữ liệu lưu trong node (thường là tuple như (row, col))
-        next : Con trỏ tới node tiếp theo (None nếu là node cuối)
+        value: Dữ liệu lưu trong node (thường là tuple như (row, col)).
+        next (Node | None): Con trỏ tới node tiếp theo (None nếu là node cuối).
+
+    Usage:
+        Không dùng trực tiếp — CustomLinkedList quản lý Node nội bộ::
+
+            linked = CustomLinkedList()
+            linked.append_tail((3, 5))
     """
     def __init__(self, value):
+        """Khởi tạo Node với giá trị cho trước.
+
+        Args:
+            value: Dữ liệu cần lưu (thường là tuple (row, col) cho pathfinding).
+        """
         self.value = value
         self.next = None
 
 
 class CustomLinkedList:
-    """
-    Linked List tự cài đặt (singly linked list).
+    """Linked List tự cài đặt (singly linked list) — dùng để lưu path trong game.
+
+    Dùng làm hàng đợi path cho Malware: reconstruct_path() thêm vào tail,
+    Malware.update() pop từ head từng ô một theo thứ tự đi.
 
     Attributes:
-        head: Node đầu danh sách
-        tail: Node cuối danh sách
-        size: Số phần tử hiện tại
+        head (Node | None): Node đầu danh sách.
+        tail (Node | None): Node cuối danh sách.
+        size (int): Số phần tử hiện tại.
 
-    Methods:
-        append_head(value): thêm vào đầu
-        append_tail(value): thêm vào cuối
-        pop_head(): lấy và xóa phần tử đầu
-        is_empty(): kiểm tra rỗng
-        __len__(): trả về size
+    Usage:
+        astar() và bfs() trả về CustomLinkedList chứa path từ start đến goal::
+
+            path = astar(graph, spawn_pos, server_pos)
+            next_cell = path.pop_head()  # lấy ô tiếp theo để đi
     """
 
     def __init__(self):
+        """Khởi tạo LinkedList rỗng."""
         self.head = None
         self.tail = None
         self.size = 0
 
-    def append_head(self, value: tuple):
-        """
-        Thêm phần tử vào đầu danh sách.
+    def append_head(self, value: tuple) -> None:
+        """Thêm phần tử vào đầu danh sách.
 
-        Input:
-            value (tuple): dữ liệu cần thêm
+        Args:
+            value (tuple): Dữ liệu cần thêm (thường là (row, col)).
 
-        Output:
-            None
-
-        Time complexity:
-            O(1)
+        Note:
+            Độ phức tạp O(1). reconstruct_path() dùng append_head() để xây path
+            theo thứ tự xuôi (truy vết ngược từ goal → start).
         """
         new_node = Node(value)
         new_node.next = self.head
@@ -55,18 +64,14 @@ class CustomLinkedList:
         self.head = new_node
         self.size += 1
 
-    def append_tail(self, value: tuple):
-        """
-        Thêm phần tử vào cuối danh sách.
+    def append_tail(self, value: tuple) -> None:
+        """Thêm phần tử vào cuối danh sách.
 
-        Input:
-            value (tuple)
+        Args:
+            value (tuple): Dữ liệu cần thêm (thường là (row, col)).
 
-        Output:
-            None
-
-        Time complexity:
-            O(1)
+        Note:
+            Độ phức tạp O(1) nhờ con trỏ tail.
         """
         new_node = Node(value)
 
@@ -80,17 +85,14 @@ class CustomLinkedList:
         self.size += 1
 
     def pop_head(self):
-        """
-        Lấy và xóa phần tử đầu danh sách.
+        """Lấy và xóa phần tử đầu danh sách.
 
-        Input:
-            None
+        Returns:
+            tuple: Giá trị của node đầu (thường là (row, col)) nếu tồn tại.
+            None: Nếu danh sách rỗng.
 
-        Output:
-            value (tuple) nếu tồn tại, None nếu rỗng
-
-        Time complexity:
-            O(1)
+        Note:
+            Độ phức tạp O(1). Malware.update() gọi mỗi bước di chuyển.
         """
         if self.head is None:
             return None
@@ -104,128 +106,141 @@ class CustomLinkedList:
 
         return value
 
-    def is_empty(self):
-        """
-        Kiểm tra danh sách có rỗng không.
+    def is_empty(self) -> bool:
+        """Kiểm tra danh sách có rỗng không.
 
-        Output:
-            bool
+        Returns:
+            bool: True nếu size == 0, False nếu còn phần tử.
         """
         return self.size == 0
 
-    def __len__(self):
-        """
-        Trả về số phần tử trong danh sách.
+    def __len__(self) -> int:
+        """Trả về số phần tử trong danh sách.
+
+        Returns:
+            int: Giá trị self.size.
         """
         return self.size
 
 
 class CustomStack:
-    """
-    Stack (LIFO) 
-    Nguyên lý:
-        push vào cuối list
-        pop từ cuối list
+    """Stack (LIFO) tự cài đặt — dùng để lưu lịch sử xây tower (Ctrl+Z).
 
-    Methods:
-        push(value)
-        pop()
-        peek()
-        is_empty()
-        __len__()
+    Nguyên lý: push vào cuối list, pop từ cuối list → O(1) cả hai chiều.
+    game.py dùng để lưu mỗi action xây tower; Ctrl+Z gọi pop() để hoàn tác.
+
+    Attributes:
+        data (list): Danh sách nội bộ lưu các phần tử.
+
+    Usage:
+        game.py lưu action xây tower và hoàn tác::
+
+            undo_stack = CustomStack()
+            undo_stack.push({"pos": (row, col), "tower": tower, "cost": cost})
+            action = undo_stack.pop()  # Ctrl+Z
     """
 
     def __init__(self):
+        """Khởi tạo Stack rỗng."""
         self.data = []
 
-    def push(self, value):
-        """
-        Thêm phần tử vào stack.
+    def push(self, value) -> None:
+        """Thêm phần tử vào đỉnh stack.
 
-        Input:
-            value: bất kỳ
+        Args:
+            value: Dữ liệu cần push (bất kỳ kiểu nào).
 
-        Output:
-            None
+        Note:
+            Độ phức tạp O(1) — append vào cuối list Python.
         """
         self.data.append(value)
 
     def pop(self):
-        """
-        Lấy và xóa phần tử top.
+        """Lấy và xóa phần tử ở đỉnh stack.
 
-        Output:
-            value hoặc None nếu rỗng
+        Returns:
+            Phần tử ở đỉnh (LIFO) nếu stack còn phần tử.
+            None nếu stack rỗng.
 
-        Time:
-            O(1)
+        Note:
+            Độ phức tạp O(1).
         """
         if len(self.data) == 0:
             return None
         return self.data.pop()
 
     def peek(self):
-        """
-        Xem phần tử top nhưng không xóa.
+        """Xem phần tử đỉnh stack nhưng không xóa.
 
-        Output:
-            value hoặc None
+        Returns:
+            Phần tử ở đỉnh nếu stack còn phần tử.
+            None nếu stack rỗng.
         """
         if len(self.data) == 0:
             return None
         return self.data[-1]
 
-    def is_empty(self):
-        """
-        Kiểm tra stack rỗng.
+    def is_empty(self) -> bool:
+        """Kiểm tra stack có rỗng không.
+
+        Returns:
+            bool: True nếu không có phần tử nào, False nếu còn phần tử.
         """
         return len(self.data) == 0
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """Trả về số phần tử trong stack.
+
+        Returns:
+            int: Số lượng phần tử hiện tại.
+        """
         return len(self.data)
 
 
 class CustomQueue:
-    """
-    Queue (FIFO) tối ưu bằng kỹ thuật lazy slicing.
-    Ý tưởng:
-        - Không pop đầu list (O(n))
-        - Dùng pointer _front để track vị trí
-        - Khi _front quá lớn thì slice lại list
+    """Queue (FIFO) tối ưu bằng kỹ thuật lazy slicing — dùng cho BFS và spawn queue.
 
-    Methods:
-        enqueue(value)
-        dequeue()
-        peek()
-        is_empty()
-        __len__()
+    Không dùng pop(0) (O(n)). Thay vào đó dùng pointer _front để track vị trí đầu.
+    Khi _front > len/2 thì slice lại list để thu hồi bộ nhớ (amortized O(1)).
+
+    Attributes:
+        _data (list): Danh sách nội bộ lưu các phần tử.
+        _front (int): Chỉ số phần tử đầu hàng đợi trong _data.
+
+    Usage:
+        BFS trong pathfinding.py và SpatialHash::
+
+            queue = CustomQueue()
+            queue.enqueue((3, 5))
+            cell = queue.dequeue()
     """
 
     def __init__(self):
+        """Khởi tạo Queue rỗng."""
         self._data = []
         self._front = 0
 
-    def enqueue(self, value):
-        """
-        Thêm phần tử vào cuối queue.
+    def enqueue(self, value) -> None:
+        """Thêm phần tử vào cuối queue.
 
-        Input:
-            value
+        Args:
+            value: Dữ liệu cần thêm (bất kỳ kiểu nào).
 
-        Output:
-            None
+        Note:
+            Độ phức tạp O(1) — append vào cuối list Python.
         """
         self._data.append(value)
 
     def dequeue(self):
-        """
-        Lấy và xóa phần tử đầu queue.
+        """Lấy và xóa phần tử đầu queue.
 
-        Output:
-            value hoặc None nếu rỗng
+        Returns:
+            Phần tử đầu hàng đợi (FIFO) nếu còn phần tử.
+            None nếu queue rỗng.
 
-        Amortized time:
-            O(1)
+        Note:
+            Amortized O(1) — dùng _front pointer thay vì pop(0).
+            Khi _front > len(_data)//2, slice lại list để thu hồi bộ nhớ.
         """
         if self.is_empty():
             return None
@@ -233,61 +248,85 @@ class CustomQueue:
         value = self._data[self._front]
         self._front += 1
 
-        # Tối ưu bộ nhớ
+        # Tối ưu bộ nhớ: thu hồi khi _front đã qua nửa list
         if self._front > len(self._data) // 2:
             self._data = self._data[self._front:]
             self._front = 0
 
         return value
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
+        """Kiểm tra queue có rỗng không.
+
+        Returns:
+            bool: True nếu không có phần tử nào, False nếu còn phần tử.
+        """
         return self._front >= len(self._data)
 
     def peek(self):
-        """
-        Xem phần tử đầu queue.
+        """Xem phần tử đầu queue nhưng không xóa.
+
+        Returns:
+            Phần tử đầu hàng đợi nếu còn phần tử.
+            None nếu queue rỗng.
         """
         if self.is_empty():
             return None
         return self._data[self._front]
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """Trả về số phần tử trong queue.
+
+        Returns:
+            int: Số lượng phần tử hiện tại (chưa dequeue).
+        """
         return len(self._data) - self._front
 
 
 class CustomMinHeap:
-    """
-    Min Heap (Priority Queue).
+    """Min Heap (Priority Queue) tự cài đặt — dùng cho A* và Tower targeting.
 
-    Lưu dưới dạng list:
-        parent < children
+    Lưu dưới dạng array-based binary heap: parent[i] <= children[i].
+    Phần tử lưu dạng tuple (priority, data) — so sánh theo priority.
 
-    Value lưu dạng tuple:
-        (priority, data)
+    Attributes:
+        _data (list): Danh sách nội bộ lưu các tuple (priority, data).
 
-    Methods:
-        push(value)
-        pop()
-        peek()
-        is_empty()
+    Usage:
+        A* dùng để chọn ô có f-score nhỏ nhất, Tower dùng để chọn target
+        có khoảng cách đến server nhỏ nhất::
+
+            heap = CustomMinHeap()
+            heap.push((f_score, (row, col)))
+            priority, cell = heap.pop()
     """
 
     def __init__(self):
+        """Khởi tạo MinHeap rỗng."""
         self._data = []
 
-    def _parent(self, i):
+    def _parent(self, i: int) -> int:
+        """Trả về chỉ số node cha của node tại i."""
         return (i - 1) // 2
 
-    def _left(self, i):
+    def _left(self, i: int) -> int:
+        """Trả về chỉ số node con trái của node tại i."""
         return 2 * i + 1
 
-    def _right(self, i):
+    def _right(self, i: int) -> int:
+        """Trả về chỉ số node con phải của node tại i."""
         return 2 * i + 2
 
-    def _swap(self, i, j):
+    def _swap(self, i: int, j: int) -> None:
+        """Hoán đổi hai phần tử tại chỉ số i và j trong _data."""
         self._data[i], self._data[j] = self._data[j], self._data[i]
 
-    def _bubble_up(self, i):
+    def _bubble_up(self, i: int) -> None:
+        """Đẩy phần tử tại i lên đúng vị trí trong heap (sau push).
+
+        Args:
+            i (int): Chỉ số phần tử vừa thêm vào.
+        """
         while i > 0:
             parent = self._parent(i)
             if self._data[i][0] < self._data[parent][0]:
@@ -296,7 +335,12 @@ class CustomMinHeap:
             else:
                 break
 
-    def _bubble_down(self, i):
+    def _bubble_down(self, i: int) -> None:
+        """Đẩy phần tử tại i xuống đúng vị trí trong heap (sau pop).
+
+        Args:
+            i (int): Chỉ số phần tử cần sắp xếp xuống (thường là 0).
+        """
         n = len(self._data)
         while True:
             left = self._left(i)
@@ -315,23 +359,27 @@ class CustomMinHeap:
             self._swap(i, smallest)
             i = smallest
 
-    def push(self, value: tuple):
-        """
-        Thêm phần tử vào heap.
-        Input:
-            value (priority, data)
+    def push(self, value: tuple) -> None:
+        """Thêm phần tử vào heap và duy trì tính chất heap.
 
-        Output:
-            None
+        Args:
+            value (tuple): (priority, data) — so sánh theo priority[0].
+
+        Note:
+            Độ phức tạp O(log n).
         """
         self._data.append(value)
         self._bubble_up(len(self._data) - 1)
 
     def pop(self):
-        """
-        Lấy phần tử nhỏ nhất.
-        Output:
-            tuple hoặc None
+        """Lấy và xóa phần tử có priority nhỏ nhất.
+
+        Returns:
+            tuple: (priority, data) của phần tử nhỏ nhất.
+            None: Nếu heap rỗng.
+
+        Note:
+            Độ phức tạp O(log n).
         """
         if len(self._data) == 0:
             return None
@@ -343,58 +391,94 @@ class CustomMinHeap:
         return min_value
 
     def peek(self):
-        """
-        Xem phần tử nhỏ nhất.
+        """Xem phần tử có priority nhỏ nhất nhưng không xóa.
+
+        Returns:
+            tuple: (priority, data) của phần tử đỉnh heap.
+            None: Nếu heap rỗng.
         """
         if len(self._data) == 0:
             return None
         return self._data[0]
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
+        """Kiểm tra heap có rỗng không.
+
+        Returns:
+            bool: True nếu không có phần tử nào.
+        """
         return len(self._data) == 0
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """Trả về số phần tử trong heap.
+
+        Returns:
+            int: Số lượng phần tử hiện tại.
+        """
         return len(self._data)
 
 
 class CustomMaxHeap:
-    """
-    Max Heap xây dựng dựa trên MinHeap.
+    """Max Heap xây dựng dựa trên CustomMinHeap — dùng cho Tower targeting "max_hp".
 
-    Ý tưởng:
-        - Đảo dấu priority (x → -x)
-        - Dùng lại toàn bộ logic của MinHeap
+    Ý tưởng: đảo dấu priority (x → -x) khi push/pop, dùng lại toàn bộ
+    logic sắp xếp của MinHeap.
 
-    Methods:
-        push(value)
-        pop()
-        peek()
+    Attributes:
+        _heap (CustomMinHeap): MinHeap nội bộ lưu các tuple (-priority, data).
+
+    Usage:
+        Tower với targeting="max_hp" dùng để chọn malware có HP nhiều nhất::
+
+            heap = CustomMaxHeap()
+            heap.push((malware.hp, malware))
+            priority, target = heap.pop()
     """
 
     def __init__(self):
+        """Khởi tạo MaxHeap rỗng (bọc MinHeap nội bộ)."""
         self._heap = CustomMinHeap()
 
-    def push(self, value: tuple):
-        """
-        Input:
-            value (priority, data)
+    def push(self, value: tuple) -> None:
+        """Thêm phần tử vào heap với priority đảo dấu.
+
+        Args:
+            value (tuple): (priority, data) — priority sẽ được lưu âm trong MinHeap.
         """
         self._heap.push((-value[0], value[1]))
 
     def pop(self):
-        """
-        Output:
-            (priority, data) hoặc None
+        """Lấy và xóa phần tử có priority lớn nhất.
+
+        Returns:
+            tuple: (priority, data) với priority dương (đã đảo lại dấu).
+            None: Nếu heap rỗng.
         """
         result = self._heap.pop()
         return (-result[0], result[1]) if result else None
 
     def peek(self):
+        """Xem phần tử có priority lớn nhất nhưng không xóa.
+
+        Returns:
+            tuple: (priority, data) với priority dương.
+            None: Nếu heap rỗng.
+        """
         result = self._heap.peek()
         return (-result[0], result[1]) if result else None
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
+        """Kiểm tra heap có rỗng không.
+
+        Returns:
+            bool: True nếu không có phần tử nào.
+        """
         return self._heap.is_empty()
 
-    def __len__(self):
+    def __len__(self) -> int:
+        """Trả về số phần tử trong heap.
+
+        Returns:
+            int: Số lượng phần tử hiện tại.
+        """
         return len(self._heap)

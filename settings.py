@@ -7,15 +7,15 @@
 # ---------------------------------------------------------------------------
 # CELL_SIZE: mỗi ô lưới chiếm bao nhiêu pixel.
 # Khi vẽ ô (row, col) → pixel_x = col * CELL_SIZE, pixel_y = row * CELL_SIZE
-CELL_SIZE = 48
-
+CELL_SIZE = 30
+TALL_FACTOR=1.6
 # FPS: số frame mỗi giây. game.py dùng clock.tick(FPS) để giới hạn tốc độ.
-FPS = 60
+FPS = 90
 
 # GRID_ROWS, GRID_COLS: kích thước lưới. Phải khớp với level JSON.
 # game.py đọc từ JSON, nhưng giá trị mặc định đặt ở đây để tham khảo.
-GRID_ROWS = 15
-GRID_COLS = 15
+GRID_ROWS = 25
+GRID_COLS = 25
 
 # Kích thước cửa sổ pixel = số ô × kích thước ô.
 # Cộng thêm HUD_HEIGHT ở dưới cùng để hiển thị tiền, HP server, wave.
@@ -84,16 +84,46 @@ MALWARE_SPYWARE_REWARD= 20
 MALWARE_RANSOMWARE_HP    = 150
 MALWARE_RANSOMWARE_SPEED = 1.0
 MALWARE_RANSOMWARE_REWARD= 30
-
+MALWARE_TROJAN_ATTACK_DAMAGE    = 5    # server dame/đòn
+MALWARE_TROJAN_ATTACK_SPEED     = 0.5
+MALWARE_WORM_ATTACK_DAMAGE      = 2
+MALWARE_WORM_ATTACK_SPEED       = 1.5
+MALWARE_SPYWARE_ATTACK_DAMAGE   = 10   # mạnh vs tháp
+MALWARE_SPYWARE_ATTACK_SPEED    = 1.0
+MALWARE_RANSOMWARE_ATTACK_DAMAGE= 20
+MALWARE_RANSOMWARE_ATTACK_SPEED = 0.5
 # ---------------------------------------------------------------------------
 # Tham số Server & Game
 # ---------------------------------------------------------------------------
-SERVER_MAX_HP   = 100000   # HP server ban đầu
+SERVER_MAX_HP   = 1000   # HP server ban đầu
 PROJECTILE_SPEED = 6.0  # ô/giây (dùng khi vẽ animation đạn)
+TOWER_BASIC_HP = 100
+TOWER_ICE_HP = 80
+TOWER_RADAR_HP = 60
 
+# ==================== WAVE COOLDOWN ====================
+PRE_WAVE_DURATION = 10.0
 # ---------------------------------------------------------------------------
 # SpatialHash
 # ---------------------------------------------------------------------------
 # SPATIAL_BUCKET_COUNT: số bucket trong hash table.
 # Nên là lũy thừa của 2 để phép & nhanh hơn phép %.
 SPATIAL_BUCKET_COUNT = 64
+
+# ---------------------------------------------------------------------------
+# UI / Animation
+# ---------------------------------------------------------------------------
+ANIM_FPS        = 8    # malware walk animation frames per second
+PORTAL_ANIM_FPS = 10   # portal swirl speed (frames/sec)
+SERVER_ANIM_FPS = 2    # server pulse speed (slow)
+
+# Map tileset — neo_zero_tiles_and_buildings_01.png (10×10 grid, 32px tiles)
+# Điều chỉnh MAP_WALL_TILE / MAP_PATH_TILE (row, col) nếu tile trông không đúng
+MAP_TILE_SIZE  = 32
+MAP_WALL_TILE  = (0, 0)   # (row, col) tile dùng cho tường
+MAP_PATH_TILE  = (0, 5)   # (row, col) tile dùng cho đường đi
+
+# Malware sprite lớn hơn cell để tạo hiệu ứng depth overlap
+SPRITE_SCALE   = 1.35     # 1.0 = vừa cell, 1.35 = 35% lớn hơn (malware)
+TOWER_SCALE    = 3     # tower sprite size multiplier (lớn hơn malware để trông oai hơn)
+TALL_FACTOR    = 1.5     # wall height multiplier for pseudo-3D look

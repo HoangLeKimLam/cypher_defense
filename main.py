@@ -7,10 +7,18 @@ from game import Game
 
 
 def main():
-  game=Game()
-  game.run()
+    """Khởi động Cypher Defense — tạo Game và chạy vòng lặp chính.
 
-  pass
+    Returns:
+        None: Hàm block cho đến khi người chơi thoát game (ESC hoặc đóng cửa sổ).
+
+    Usage:
+        Chạy trực tiếp từ terminal::
+
+            python main.py
+    """
+    game = Game()
+    game.run()
 
 
 if __name__ == "__main__":
