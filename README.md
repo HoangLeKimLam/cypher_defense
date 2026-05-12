@@ -266,19 +266,7 @@ Cả **RiposteWare** (malware) và **RiposteBoss** đều dùng cơ chế phản
 
 ---
 
-## Tiến trình Level
 
-| Level | Tháp mở mới | Boss wave cuối | Điểm mới |
-|---|---|---|---|
-| **1** | BasicNode, IceWall + nâng cấp T1 | RiposteBoss | Cơ bản, học cơ chế |
-| **2** | SpeedNode, SpreadNode | FireWorm + FlyingDemon | Bomb xuất hiện, AoE |
-| **3** | RadarNode, FireNode | Shadow | Tàng hình + roll invincibility |
-| **4** | PoisonNode, FreezeNode | RiposteBoss | Phản đạn nâng cao |
-| **5** | SniperNode | Final Boss | Bản đồ thay đổi + atomic bomb |
-
-Hoàn thành level → mở khóa level tiếp theo, lưu vào `progress.json`.
-
----
 
 ## Thuật toán & CTDL
 
